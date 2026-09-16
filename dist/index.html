@@ -125,6 +125,10 @@
             <span>My Roll</span>
             <b id="rollCountBadge" hidden>0</b>
           </button>
+          <button class="nav-item" type="button" data-view="galleryView">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.7 0L12 5.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7L12 21l8.8-8.7a5.4 5.4 0 0 0 0-7.7Z" /></svg>
+            <span>Our Night</span>
+          </button>
         </nav>
       </section>
 
@@ -138,7 +142,7 @@
         </header>
         <div class="roll-intro">
           <p>Captured by <strong id="rollGuestName">Guest</strong></p>
-          <p>Stored safely on this device for now.</p>
+          <p>Saved here first, then uploaded when connected.</p>
         </div>
         <div id="rollGrid" class="roll-grid" aria-live="polite"></div>
         <div id="rollEmpty" class="roll-empty">
@@ -156,6 +160,50 @@
             <span class="roll-thumbnail"></span>
             <span>My Roll</span>
             <b id="rollCountBadgeRoll" hidden>0</b>
+          </button>
+          <button class="nav-item" type="button" data-view="galleryView">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.7 0L12 5.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7L12 21l8.8-8.7a5.4 5.4 0 0 0 0-7.7Z" /></svg>
+            <span>Our Night</span>
+          </button>
+        </nav>
+      </section>
+
+      <section id="galleryView" class="view gallery-view" aria-labelledby="galleryTitle">
+        <header class="app-header gallery-header">
+          <div>
+            <p class="brand-small">Nicky &amp; Gina</p>
+            <h2 id="galleryTitle" class="section-title">Our Night</h2>
+          </div>
+          <p class="cloud-status" data-cloud-status>Local mode</p>
+        </header>
+        <div class="gallery-intro">
+          <p class="eyebrow">Captured by the people we love</p>
+          <h3>Every point of view,<br /><em>one shared memory.</em></h3>
+          <p>Tap a frame to see it in full, or leave a heart for the moments you love.</p>
+        </div>
+        <div id="galleryGrid" class="gallery-grid" aria-live="polite"></div>
+        <div id="galleryLoading" class="gallery-state" hidden>
+          <span class="developing-mark"></span>
+          <p>Gathering tonight’s frames…</p>
+        </div>
+        <div id="galleryEmpty" class="gallery-state">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5h3l1.5-2h7l1.5 2h3v10H4z" /><circle cx="12" cy="13.5" r="3.5" /></svg>
+          <h3 id="galleryEmptyTitle">Cloud album not connected</h3>
+          <p id="galleryEmptyText">Add the Firebase configuration to begin sharing everyone’s photos.</p>
+        </div>
+        <nav class="bottom-nav" aria-label="Main navigation">
+          <button class="nav-item" type="button" data-view="cameraView">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5h3l1.5-2h7l1.5 2h3v10H4z" /><circle cx="12" cy="13.5" r="3.5" /></svg>
+            <span>Camera</span>
+          </button>
+          <button class="nav-item" type="button" data-view="rollView">
+            <span class="roll-thumbnail"></span>
+            <span>My Roll</span>
+            <b id="rollCountBadgeGallery" hidden>0</b>
+          </button>
+          <button class="nav-item is-selected" type="button" data-view="galleryView" aria-current="page">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.7 0L12 5.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7L12 21l8.8-8.7a5.4 5.4 0 0 0 0-7.7Z" /></svg>
+            <span>Our Night</span>
           </button>
         </nav>
       </section>
@@ -180,7 +228,13 @@
       <img id="fullPhoto" alt="Wedding photo" />
       <div class="lightbox-meta">
         <p id="fullPhotoLabel"></p>
-        <button id="sharePhotoButton" class="text-button" type="button">Share / save</button>
+        <div class="lightbox-actions">
+          <button id="fullPhotoHeartButton" class="lightbox-heart" type="button" aria-label="Like photo" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.7 0L12 5.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7L12 21l8.8-8.7a5.4 5.4 0 0 0 0-7.7Z" /></svg>
+            <span id="fullPhotoHeartCount">0</span>
+          </button>
+          <button id="sharePhotoButton" class="text-button" type="button">Share / save</button>
+        </div>
       </div>
     </dialog>
 
@@ -195,11 +249,12 @@
         <li><span>02</span><p>Every kept photo gets our warm film look.</p></li>
         <li><span>03</span><p>Your first 12 frames stay in My Roll on this device.</p></li>
       </ol>
-      <p class="privacy-note">In this first test build, photos do not leave your phone.</p>
+      <p class="privacy-note">Photos are saved on your phone first. When cloud sharing is connected, they upload in the background and retry after interruptions.</p>
     </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <canvas id="captureCanvas" hidden></canvas>
+    <script src="firebase-config.js"></script>
     <script src="app.js" defer></script>
   </body>
 </html>

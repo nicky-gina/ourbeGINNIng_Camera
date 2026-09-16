@@ -1,0 +1,54 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    match /photos/{photoId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && request.resource.data.guestId == request.auth.uid
+        && request.resource.data.guestName is string
+        && request.resource.data.guestName.size() >= 1
+        && request.resource.data.guestName.size() <= 36
+        && request.resource.data.likeCount == 0
+        && request.resource.data.originalPath is string
+        && request.resource.data.thumbPath is string
+        && request.resource.data.keys().hasOnly([
+          'guestId', 'guestName', 'originalPath', 'thumbPath',
+          'capturedAt', 'createdAt', 'likeCount', 'width', 'height'
+        ]);
+
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount'])
+        && request.resource.data.likeCount is int
+        && request.resource.data.likeCount >= 0
+        && (
+          (
+            request.resource.data.likeCount == resource.data.likeCount + 1
+            && !exists(/databases/$(database)/documents/photos/$(photoId)/likes/$(request.auth.uid))
+            && existsAfter(/databases/$(database)/documents/photos/$(photoId)/likes/$(request.auth.uid))
+          )
+          || (
+            request.resource.data.likeCount == resource.data.likeCount - 1
+            && exists(/databases/$(database)/documents/photos/$(photoId)/likes/$(request.auth.uid))
+            && !existsAfter(/databases/$(database)/documents/photos/$(photoId)/likes/$(request.auth.uid))
+          )
+        );
+
+      allow delete: if false;
+
+      match /likes/{userId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && userId == request.auth.uid
+          && request.resource.data.keys().hasOnly(['createdAt']);
+        allow update: if false;
+        allow delete: if signedIn() && userId == request.auth.uid;
+      }
+    }
+  }
+}
