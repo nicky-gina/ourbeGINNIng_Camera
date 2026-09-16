@@ -1,0 +1,10 @@
+{
+  "name": "Nicky & Gina Wedding Camera",
+  "short_name": "N&G Camera",
+  "description": "Capture Nicky & Gina's wedding night through your eyes.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#07111f",
+  "theme_color": "#07111f",
+  "orientation": "portrait-primary"
+}
