@@ -18,15 +18,4 @@ A mobile-first, GitHub Pages-ready prototype for the wedding disposable-camera e
 
 Photos remain only on the guest's device in V0.1. Firebase upload, the shared gallery, hearts, and Google Drive backup are intentionally reserved for the next connected build.
 
-## Test locally
 
-Serve the `dist` folder from any local web server. Camera access normally requires HTTPS, except on `localhost`.
-
-## Deploy to GitHub Pages
-
-1. Create a GitHub repository and place these files in it.
-2. Push to the `main` branch.
-3. In **Settings → Pages**, select **GitHub Actions** as the source.
-4. The included workflow publishes the `dist` folder automatically.
-
-The production URL will look like `https://yourusername.github.io/repository-name/`.
