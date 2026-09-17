@@ -395,6 +395,9 @@ svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-
 .roll-card .sync-label { left: auto; right: .5rem; padding: .2rem .35rem; background: rgba(4,10,22,.68); color: rgba(255,255,255,.9); letter-spacing: .05em; backdrop-filter: blur(8px); }
 .roll-card .sync-label.is-uploaded { color: #d8bd89; }
 .roll-card .sync-label.is-failed { color: #ffb8b8; }
+.roll-card .sync-label.is-drive-backed-up { color: #f0d598; border: 1px solid rgba(216,189,137,.28); }
+.roll-card .sync-label.is-drive-processing { color: #dbe7f6; }
+.roll-card .sync-label.is-drive-failed { color: #ffcfad; }
 .roll-empty { flex: 1; min-height: calc(100dvh - 14rem); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2.2rem 1.5rem; text-align: center; }
 .roll-empty[hidden] { display: none; }
 .empty-frame { width: 6.5rem; aspect-ratio: 3/4; display: grid; place-items: center; border: 1px solid rgba(220,226,235,.25); color: rgba(220,226,235,.28); transform: rotate(-3deg); }

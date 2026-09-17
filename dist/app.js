@@ -20,6 +20,7 @@
   let cloudState = "unconfigured";
   let galleryPhotos = [];
   let galleryUnsubscribe = null;
+  let backupUnsubscribe = null;
   let isFlushingUploads = false;
 
   const guestName = () => localStorage.getItem("ng_guest_name") || "";
@@ -354,6 +355,18 @@
           console.error("Gallery connection failed", error);
           setCloudState(navigator.onLine ? "error" : "offline", navigator.onLine ? "Gallery unavailable" : "Offline");
         });
+        backupUnsubscribe?.();
+        backupUnsubscribe = weddingCloud.subscribeOwnBackups(async (statuses) => {
+          const changed = photos.filter((photo) => {
+            const next = statuses[photo.id] || null;
+            return JSON.stringify(photo.driveBackup || null) !== JSON.stringify(next);
+          });
+          for (const photo of changed) {
+            photo.driveBackup = statuses[photo.id] || null;
+            await persistPhoto(photo);
+          }
+          if (changed.length) renderRoll();
+        }, (error) => console.error("Drive backup status connection failed", error));
         void flushUploadQueue();
         return weddingCloud;
       } catch (error) {
@@ -516,14 +529,21 @@
       const label = document.createElement("span");
       label.textContent = `N&G / ${String(photos.length - index).padStart(2, "0")}`;
       const syncLabel = document.createElement("span");
-      syncLabel.className = `sync-label is-${photo.syncState}`;
-      syncLabel.textContent = ({
+      const backupStatus = photo.driveBackup?.status;
+      const baseSyncLabel = ({
         uploaded: "Uploaded",
         uploading: "Uploading",
         failed: "Retrying",
         pending: "Waiting",
         "local-only": "Local"
       })[photo.syncState] || "Local";
+      const backupLabel = photo.syncState === "uploaded" ? ({
+        backed_up: "Drive backed up",
+        processing: "Drive backup…",
+        failed: "Drive retrying"
+      })[backupStatus] : null;
+      syncLabel.className = `sync-label is-${photo.syncState}${backupStatus ? ` is-drive-${backupStatus.replace("_", "-")}` : ""}`;
+      syncLabel.textContent = backupLabel || baseSyncLabel;
       button.append(img, label, syncLabel);
       button.addEventListener("click", () => openPhoto(photo, photos.length - index));
       els.rollGrid.append(button);

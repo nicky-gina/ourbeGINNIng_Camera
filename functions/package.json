@@ -1,0 +1,20 @@
+{
+  "name": "nicky-gina-wedding-camera-functions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Server-side Google Drive backup for the Nicky & Gina wedding camera.",
+  "main": "index.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "authorize-drive": "node scripts/authorize-drive.mjs",
+    "configure-drive-secrets": "node scripts/configure-drive-secrets.mjs",
+    "check": "node --check index.js && node --check scripts/authorize-drive.mjs && node --check scripts/configure-drive-secrets.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "14.4.0",
+    "firebase-functions": "7.4.0",
+    "googleapis": "181.0.0"
+  }
+}

@@ -15,7 +15,8 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  setDoc
+  setDoc,
+  where
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import {
   getDownloadURL,
@@ -57,10 +58,10 @@ export async function connectWeddingCloud(config) {
     const thumbPath = `${basePath}/thumb.jpg`;
     const metadata = { contentType: "image/jpeg", cacheControl: "public,max-age=31536000,immutable" };
 
-    await Promise.all([
-      uploadBytes(ref(storage, originalPath), blob, metadata),
-      uploadBytes(ref(storage, thumbPath), thumbBlob, metadata)
-    ]);
+    // Publish the thumbnail and Firestore metadata before the original. The
+    // original upload is the server-side Drive backup trigger, so its photo
+    // record is guaranteed to exist when the function starts.
+    await uploadBytes(ref(storage, thumbPath), thumbBlob, metadata);
 
     const photoRef = doc(db, "photos", id);
     const existingPhoto = await getDoc(photoRef);
@@ -78,7 +79,31 @@ export async function connectWeddingCloud(config) {
       });
     }
 
+    await uploadBytes(ref(storage, originalPath), blob, metadata);
+
     return { originalPath, thumbPath };
+  }
+
+  function subscribeOwnBackups(onStatuses, onError) {
+    const ownPhotosQuery = query(collection(db, "photos"), where("guestId", "==", user.uid));
+    return onSnapshot(ownPhotosQuery, (snapshot) => {
+      const statuses = {};
+      snapshot.docs.forEach((snapshotDoc) => {
+        const data = snapshotDoc.data();
+        const backup = data.driveBackup;
+        statuses[snapshotDoc.id] = backup ? {
+          status: backup.status || null,
+          attemptCount: Number(backup.attemptCount || 0),
+          fileId: backup.fileId || null,
+          fileName: backup.fileName || null,
+          webViewLink: backup.webViewLink || null,
+          lastError: backup.lastError || null,
+          backedUpAt: backup.backedUpAt?.toMillis?.() || null,
+          updatedAt: backup.updatedAt?.toMillis?.() || null
+        } : null;
+      });
+      onStatuses(statuses);
+    }, onError);
   }
 
   function subscribeGallery(onPhotos, onError) {
@@ -133,6 +158,7 @@ export async function connectWeddingCloud(config) {
     userId: user.uid,
     uploadPhoto,
     subscribeGallery,
+    subscribeOwnBackups,
     toggleLike,
     getOriginalUrl
   };
