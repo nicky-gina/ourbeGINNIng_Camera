@@ -39,7 +39,10 @@ service cloud.firestore {
           )
         );
 
-      allow delete: if false;
+      // Required by the intentionally client-gated owner purge control.
+      // NG_OWNER_NAMES is not secure authorization; any signed-in app user
+      // could reproduce this delete request outside the visible interface.
+      allow delete: if signedIn();
 
       match /likes/{userId} {
         allow read: if signedIn();
@@ -47,7 +50,7 @@ service cloud.firestore {
           && userId == request.auth.uid
           && request.resource.data.keys().hasOnly(['createdAt']);
         allow update: if false;
-        allow delete: if signedIn() && userId == request.auth.uid;
+        allow delete: if signedIn();
       }
     }
   }

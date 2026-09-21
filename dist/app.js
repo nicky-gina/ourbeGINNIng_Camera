@@ -23,6 +23,7 @@
   let galleryUnsubscribe = null;
   let isFlushingUploads = false;
   let isDownloadingAlbum = false;
+  let isPurgingAlbum = false;
 
   const guestName = () => localStorage.getItem("ng_guest_name") || "";
 
@@ -39,6 +40,7 @@
   function updateOwnerTools() {
     if (!els.ownerTools) return;
     els.ownerTools.hidden = !isAlbumOwner();
+    if (els.deployedVersion) els.deployedVersion.textContent = `V${window.NG_APP_VERSION || "unknown"}`;
     if (els.ownerTools.hidden && els.downloadAllStatus) els.downloadAllStatus.textContent = "";
   }
 
@@ -387,11 +389,12 @@
   }
 
   async function flushUploadQueue() {
-    if (!weddingCloud || !navigator.onLine || isFlushingUploads) return;
+    if (!weddingCloud || !navigator.onLine || isFlushingUploads || isPurgingAlbum) return;
     isFlushingUploads = true;
     try {
       const queue = photos.filter((photo) => photo.syncState === "pending" || photo.syncState === "failed");
       for (const photo of queue) {
+        if (isPurgingAlbum) break;
         photo.syncState = "uploading";
         photo.uploadAttempts = Number(photo.uploadAttempts || 0) + 1;
         await persistPhoto(photo);
@@ -847,7 +850,7 @@
   }
 
   async function downloadAllOriginals() {
-    if (!isAlbumOwner() || isDownloadingAlbum) return;
+    if (!isAlbumOwner() || isDownloadingAlbum || isPurgingAlbum) return;
     isDownloadingAlbum = true;
     els.downloadAllButton.disabled = true;
     els.downloadAllButton.textContent = "Preparing originals…";
@@ -910,6 +913,71 @@
       isDownloadingAlbum = false;
       els.downloadAllButton.disabled = false;
       els.downloadAllButton.textContent = "Download all originals";
+    }
+  }
+
+  async function clearLocalPhotos() {
+    const db = await openDatabase();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("Local photo deletion was aborted"));
+    });
+    photos = [];
+    renderRoll();
+    updateCameraUI();
+  }
+
+  async function deleteAllPhotos() {
+    if (!isAlbumOwner() || isPurgingAlbum || isDownloadingAlbum) return;
+    const phrase = window.prompt(
+      "This permanently deletes every uploaded photo, thumbnail and heart from Firebase, plus photos stored by this app on this device.\n\nType DELETE ALL PHOTOS to continue."
+    );
+    if (phrase === null) {
+      els.downloadAllStatus.textContent = "Deletion cancelled.";
+      return;
+    }
+    if (phrase.trim() !== "DELETE ALL PHOTOS") {
+      els.downloadAllStatus.textContent = "Nothing was deleted—the confirmation phrase did not match.";
+      return;
+    }
+    if (!window.confirm("Final confirmation: permanently purge the wedding-camera album now? This cannot be undone.")) {
+      els.downloadAllStatus.textContent = "Deletion cancelled.";
+      return;
+    }
+
+    isPurgingAlbum = true;
+    els.deleteAllButton.disabled = true;
+    els.downloadAllButton.disabled = true;
+    els.deleteAllButton.textContent = "Deleting photos…";
+    els.downloadAllStatus.textContent = "Connecting to the full album…";
+
+    try {
+      while (isFlushingUploads) await new Promise((resolve) => setTimeout(resolve, 100));
+      const cloud = weddingCloud || await initWeddingCloud();
+      if (!cloud) throw new Error("Cloud album is unavailable");
+      const localCount = photos.length;
+      const result = await cloud.deleteAllPhotos(({ phase, deleted, total, storageDeleted }) => {
+        els.downloadAllStatus.textContent = phase === "storage"
+          ? `Deleting uploaded image file ${storageDeleted}…`
+          : `Deleting server photo record ${deleted} of ${total}…`;
+      });
+      await clearLocalPhotos();
+      galleryPhotos = [];
+      renderGallery();
+      els.downloadAllStatus.textContent = `Purge complete: ${result.storageDeleted} uploaded files, ${result.deleted} server photo records and ${localCount} local ${localCount === 1 ? "photo" : "photos"} deleted.`;
+      showToast("Test photos permanently deleted.");
+    } catch (error) {
+      console.error("Album purge failed", error);
+      els.downloadAllStatus.textContent = "The purge stopped before completion. Check the published Firebase rules and connection, then run it again.";
+      showToast("Photo purge could not be completed.");
+    } finally {
+      isPurgingAlbum = false;
+      els.deleteAllButton.disabled = false;
+      els.downloadAllButton.disabled = false;
+      els.deleteAllButton.textContent = "Delete all test photos";
     }
   }
 
@@ -981,6 +1049,7 @@
   els.closePhotoButton.addEventListener("click", closePhoto);
   els.sharePhotoButton.addEventListener("click", shareSelectedPhoto);
   els.downloadAllButton?.addEventListener("click", downloadAllOriginals);
+  els.deleteAllButton?.addEventListener("click", deleteAllPhotos);
   els.fullPhotoHeartButton.addEventListener("click", () => {
     if (selectedPhoto?.originalPath) void toggleGalleryLike(selectedPhoto, els.fullPhotoHeartButton);
   });

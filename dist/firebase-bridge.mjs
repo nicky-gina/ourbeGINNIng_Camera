@@ -6,6 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -19,8 +20,10 @@ import {
   setDoc
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import {
+  deleteObject,
   getDownloadURL,
   getStorage,
+  listAll as listStorageItems,
   ref,
   uploadBytes
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-storage.js";
@@ -139,12 +142,53 @@ export async function connectWeddingCloud(config) {
     }));
   }
 
+  async function deleteStoredObject(path) {
+    if (!path) return;
+    try {
+      await deleteObject(ref(storage, path));
+    } catch (error) {
+      if (error?.code !== "storage/object-not-found") throw error;
+    }
+  }
+
+  async function deleteStorageTree(folderReference, onDeleted) {
+    const listing = await listStorageItems(folderReference);
+    for (const item of listing.items) {
+      await deleteStoredObject(item.fullPath);
+      onDeleted();
+    }
+    for (const prefix of listing.prefixes) await deleteStorageTree(prefix, onDeleted);
+  }
+
+  async function deleteAllPhotos(onProgress = () => {}) {
+    const snapshot = await getDocs(query(collection(db, "photos"), orderBy("createdAt", "asc")));
+    const total = snapshot.size;
+    let deleted = 0;
+    let storageDeleted = 0;
+
+    await deleteStorageTree(ref(storage, "wedding-photos"), () => {
+      storageDeleted += 1;
+      onProgress({ phase: "storage", deleted, total, storageDeleted });
+    });
+
+    for (const photoSnapshot of snapshot.docs) {
+      const likesSnapshot = await getDocs(collection(db, "photos", photoSnapshot.id, "likes"));
+      for (const likeSnapshot of likesSnapshot.docs) await deleteDoc(likeSnapshot.ref);
+      await deleteDoc(photoSnapshot.ref);
+      deleted += 1;
+      onProgress({ phase: "database", deleted, total, storageDeleted });
+    }
+
+    return { deleted, total, storageDeleted };
+  }
+
   return {
     userId: user.uid,
     uploadPhoto,
     subscribeGallery,
     toggleLike,
     getOriginalUrl,
-    listAllPhotos
+    listAllPhotos,
+    deleteAllPhotos
   };
 }
