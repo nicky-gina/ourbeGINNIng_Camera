@@ -24,16 +24,10 @@ Create the default Storage bucket and paste the complete contents of `firebase/s
 
 Commit the complete `dist` folder and the existing `.github/workflows/pages.yml`. The workflow will publish `dist` to GitHub Pages. The `firebase` folder and `firebase.json` can remain in the repository for rule versioning but are not served publicly by Pages.
 
-## 6. Connect Google Drive backup
-
-Follow `firebase/DRIVE_BACKUP_SETUP.md`. GitHub Pages cannot deploy the Cloud Function; it is deployed once from your computer using Firebase CLI.
-
 ## Verification checklist
 
 - The Gallery header says **Cloud connected**.
 - A newly kept photo first appears in **My Roll**, then shows **Uploaded**.
 - The photo appears in **Our Night** on a second phone.
 - A heart toggled on one phone updates the count on the other.
-- The My Roll badge changes from **Uploaded** to **Drive backup…** and finally **Drive backed up**.
-- The Firestore photo document contains `driveBackup.status: "backed_up"` and a Drive file ID.
 - With airplane mode enabled, a new photo remains in My Roll as **Waiting**, then uploads when connectivity returns.

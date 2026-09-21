@@ -12,3 +12,9 @@ window.NG_FIREBASE_CONFIG = {
   appId: "1:1012992129630:web:3e051ac7b7a688fa77d2cf",
   measurementId: "G-LWE7HGTFNP"
 };
+
+/*
+ * This is intentionally only a convenience gate, not real authentication.
+ * Names are matched without regard to capitalization or surrounding spaces.
+ */
+window.NG_OWNER_NAMES = ["NLO_ADMIN"];

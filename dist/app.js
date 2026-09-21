@@ -2,6 +2,7 @@
   "use strict";
 
   const SHOT_LIMIT = 12;
+  const DOWNLOAD_BATCH_SIZE = 75;
   const DB_NAME = "ng-wedding-camera";
   const STORE_NAME = "photos";
   const els = Object.fromEntries([...document.querySelectorAll("[id]")].map((el) => [el.id, el]));
@@ -20,10 +21,26 @@
   let cloudState = "unconfigured";
   let galleryPhotos = [];
   let galleryUnsubscribe = null;
-  let backupUnsubscribe = null;
   let isFlushingUploads = false;
+  let isDownloadingAlbum = false;
 
   const guestName = () => localStorage.getItem("ng_guest_name") || "";
+
+  function normalizedName(value) {
+    return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  }
+
+  function isAlbumOwner() {
+    const configuredNames = Array.isArray(window.NG_OWNER_NAMES) ? window.NG_OWNER_NAMES : [];
+    const currentName = normalizedName(guestName());
+    return Boolean(currentName && configuredNames.some((name) => normalizedName(name) === currentName));
+  }
+
+  function updateOwnerTools() {
+    if (!els.ownerTools) return;
+    els.ownerTools.hidden = !isAlbumOwner();
+    if (els.ownerTools.hidden && els.downloadAllStatus) els.downloadAllStatus.textContent = "";
+  }
 
   function openDatabase() {
     if (!dbPromise) {
@@ -91,6 +108,7 @@
     }
     if (id === "rollView") renderRoll();
     if (id === "galleryView") renderGallery();
+    updateOwnerTools();
     window.scrollTo(0, 0);
   }
 
@@ -355,18 +373,6 @@
           console.error("Gallery connection failed", error);
           setCloudState(navigator.onLine ? "error" : "offline", navigator.onLine ? "Gallery unavailable" : "Offline");
         });
-        backupUnsubscribe?.();
-        backupUnsubscribe = weddingCloud.subscribeOwnBackups(async (statuses) => {
-          const changed = photos.filter((photo) => {
-            const next = statuses[photo.id] || null;
-            return JSON.stringify(photo.driveBackup || null) !== JSON.stringify(next);
-          });
-          for (const photo of changed) {
-            photo.driveBackup = statuses[photo.id] || null;
-            await persistPhoto(photo);
-          }
-          if (changed.length) renderRoll();
-        }, (error) => console.error("Drive backup status connection failed", error));
         void flushUploadQueue();
         return weddingCloud;
       } catch (error) {
@@ -529,21 +535,14 @@
       const label = document.createElement("span");
       label.textContent = `N&G / ${String(photos.length - index).padStart(2, "0")}`;
       const syncLabel = document.createElement("span");
-      const backupStatus = photo.driveBackup?.status;
-      const baseSyncLabel = ({
+      syncLabel.className = `sync-label is-${photo.syncState}`;
+      syncLabel.textContent = ({
         uploaded: "Uploaded",
         uploading: "Uploading",
         failed: "Retrying",
         pending: "Waiting",
         "local-only": "Local"
       })[photo.syncState] || "Local";
-      const backupLabel = photo.syncState === "uploaded" ? ({
-        backed_up: "Drive backed up",
-        processing: "Drive backup…",
-        failed: "Drive retrying"
-      })[backupStatus] : null;
-      syncLabel.className = `sync-label is-${photo.syncState}${backupStatus ? ` is-drive-${backupStatus.replace("_", "-")}` : ""}`;
-      syncLabel.textContent = backupLabel || baseSyncLabel;
       button.append(img, label, syncLabel);
       button.addEventListener("click", () => openPhoto(photo, photos.length - index));
       els.rollGrid.append(button);
@@ -710,6 +709,210 @@
     }
   }
 
+  const CRC32_TABLE = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let value = n;
+      for (let bit = 0; bit < 8; bit += 1) value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+      table[n] = value >>> 0;
+    }
+    return table;
+  })();
+
+  function crc32(bytes) {
+    let crc = 0xffffffff;
+    for (const byte of bytes) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+
+  function zipDateParts(date) {
+    const year = Math.min(2107, Math.max(1980, date.getFullYear()));
+    return {
+      time: (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1),
+      date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate()
+    };
+  }
+
+  async function createStoredZip(entries) {
+    const encoder = new TextEncoder();
+    const localParts = [];
+    const centralParts = [];
+    let localOffset = 0;
+    let centralSize = 0;
+
+    for (const entry of entries) {
+      const nameBytes = encoder.encode(entry.name);
+      const data = new Uint8Array(await entry.blob.arrayBuffer());
+      const checksum = crc32(data);
+      const stamp = zipDateParts(entry.date);
+      const localHeader = new Uint8Array(30 + nameBytes.length);
+      const localView = new DataView(localHeader.buffer);
+      localView.setUint32(0, 0x04034b50, true);
+      localView.setUint16(4, 20, true);
+      localView.setUint16(6, 0x0800, true);
+      localView.setUint16(8, 0, true);
+      localView.setUint16(10, stamp.time, true);
+      localView.setUint16(12, stamp.date, true);
+      localView.setUint32(14, checksum, true);
+      localView.setUint32(18, data.byteLength, true);
+      localView.setUint32(22, data.byteLength, true);
+      localView.setUint16(26, nameBytes.length, true);
+      localView.setUint16(28, 0, true);
+      localHeader.set(nameBytes, 30);
+      localParts.push(localHeader, data);
+
+      const centralHeader = new Uint8Array(46 + nameBytes.length);
+      const centralView = new DataView(centralHeader.buffer);
+      centralView.setUint32(0, 0x02014b50, true);
+      centralView.setUint16(4, 20, true);
+      centralView.setUint16(6, 20, true);
+      centralView.setUint16(8, 0x0800, true);
+      centralView.setUint16(10, 0, true);
+      centralView.setUint16(12, stamp.time, true);
+      centralView.setUint16(14, stamp.date, true);
+      centralView.setUint32(16, checksum, true);
+      centralView.setUint32(20, data.byteLength, true);
+      centralView.setUint32(24, data.byteLength, true);
+      centralView.setUint16(28, nameBytes.length, true);
+      centralView.setUint32(42, localOffset, true);
+      centralHeader.set(nameBytes, 46);
+      centralParts.push(centralHeader);
+      centralSize += centralHeader.byteLength;
+      localOffset += localHeader.byteLength + data.byteLength;
+    }
+
+    const end = new Uint8Array(22);
+    const endView = new DataView(end.buffer);
+    endView.setUint32(0, 0x06054b50, true);
+    endView.setUint16(8, entries.length, true);
+    endView.setUint16(10, entries.length, true);
+    endView.setUint32(12, centralSize, true);
+    endView.setUint32(16, localOffset, true);
+    return new Blob([...localParts, ...centralParts, end], { type: "application/zip" });
+  }
+
+  function photoTimestamp(photo) {
+    if (Number.isFinite(Number(photo.capturedAt))) return Number(photo.capturedAt);
+    if (typeof photo.createdAt?.toMillis === "function") return photo.createdAt.toMillis();
+    if (Number.isFinite(Number(photo.createdAt))) return Number(photo.createdAt);
+    return Date.now();
+  }
+
+  function filenamePart(value, fallback) {
+    const cleaned = String(value || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    return cleaned || fallback;
+  }
+
+  function originalFilename(photo, index) {
+    const timestamp = photoTimestamp(photo);
+    const date = new Date(timestamp);
+    const dateText = Number.isNaN(date.getTime())
+      ? "unknown-date"
+      : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}_${String(date.getHours()).padStart(2, "0")}-${String(date.getMinutes()).padStart(2, "0")}-${String(date.getSeconds()).padStart(2, "0")}`;
+    const guest = filenamePart(photo.guestName, "Guest");
+    const id = filenamePart(String(photo.id || "").slice(-10), "photo");
+    return `Nicky-Gina_${String(index + 1).padStart(4, "0")}_${dateText}_${guest}_${id}.jpg`;
+  }
+
+  async function fetchOriginalBlob(photo) {
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        const url = await weddingCloud.getOriginalUrl(photo.originalPath);
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Photo request returned ${response.status}`);
+        return await response.blob();
+      } catch (error) {
+        lastError = error;
+        if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 700));
+      }
+    }
+    throw lastError || new Error("Photo download failed");
+  }
+
+  function triggerBlobDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+
+  async function downloadAllOriginals() {
+    if (!isAlbumOwner() || isDownloadingAlbum) return;
+    isDownloadingAlbum = true;
+    els.downloadAllButton.disabled = true;
+    els.downloadAllButton.textContent = "Preparing originals…";
+    els.downloadAllStatus.textContent = "Connecting to the full album…";
+    let directoryHandle = null;
+
+    try {
+      if (typeof window.showDirectoryPicker === "function") {
+        directoryHandle = await window.showDirectoryPicker({ id: "nicky-gina-originals", mode: "readwrite" });
+      }
+      const cloud = weddingCloud || await initWeddingCloud();
+      if (!cloud) throw new Error("Cloud album is unavailable");
+      const records = (await cloud.listAllPhotos()).filter((photo) => photo.originalPath);
+      if (!records.length) {
+        els.downloadAllStatus.textContent = "There are no uploaded originals yet.";
+        return;
+      }
+
+      if (directoryHandle) {
+        for (let index = 0; index < records.length; index += 1) {
+          els.downloadAllStatus.textContent = `Saving original ${index + 1} of ${records.length}…`;
+          const blob = await fetchOriginalBlob(records[index]);
+          const fileHandle = await directoryHandle.getFileHandle(originalFilename(records[index], index), { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        }
+        els.downloadAllStatus.textContent = `${records.length} full-resolution originals saved to the selected folder.`;
+      } else {
+        const partCount = Math.ceil(records.length / DOWNLOAD_BATCH_SIZE);
+        for (let partIndex = 0; partIndex < partCount; partIndex += 1) {
+          const start = partIndex * DOWNLOAD_BATCH_SIZE;
+          const batch = records.slice(start, start + DOWNLOAD_BATCH_SIZE);
+          const entries = [];
+          for (let batchIndex = 0; batchIndex < batch.length; batchIndex += 1) {
+            const overallIndex = start + batchIndex;
+            els.downloadAllStatus.textContent = `Preparing part ${partIndex + 1} of ${partCount}: photo ${overallIndex + 1} of ${records.length}…`;
+            entries.push({
+              name: originalFilename(batch[batchIndex], overallIndex),
+              blob: await fetchOriginalBlob(batch[batchIndex]),
+              date: new Date(photoTimestamp(batch[batchIndex]))
+            });
+          }
+          const zip = await createStoredZip(entries);
+          triggerBlobDownload(zip, `Nicky-Gina-Wedding-Originals-Part-${String(partIndex + 1).padStart(2, "0")}-of-${String(partCount).padStart(2, "0")}.zip`);
+          if (partIndex + 1 < partCount) await new Promise((resolve) => setTimeout(resolve, 900));
+        }
+        els.downloadAllStatus.textContent = `${records.length} full-resolution originals prepared in ${partCount} ZIP ${partCount === 1 ? "file" : "files"}.`;
+      }
+      showToast("Album originals downloaded.");
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        els.downloadAllStatus.textContent = "Download cancelled.";
+      } else {
+        console.error("Album download failed", error);
+        els.downloadAllStatus.textContent = "The download stopped. Check your connection and try again.";
+        showToast("Album download could not be completed.");
+      }
+    } finally {
+      isDownloadingAlbum = false;
+      els.downloadAllButton.disabled = false;
+      els.downloadAllButton.textContent = "Download all originals";
+    }
+  }
+
   function registerWebMCP() {
     const context = document.modelContext;
     if (!context?.registerTool) return;
@@ -777,6 +980,7 @@
   els.keepButton.addEventListener("click", keepPendingPhoto);
   els.closePhotoButton.addEventListener("click", closePhoto);
   els.sharePhotoButton.addEventListener("click", shareSelectedPhoto);
+  els.downloadAllButton?.addEventListener("click", downloadAllOriginals);
   els.fullPhotoHeartButton.addEventListener("click", () => {
     if (selectedPhoto?.originalPath) void toggleGalleryLike(selectedPhoto, els.fullPhotoHeartButton);
   });
@@ -806,6 +1010,7 @@
     landingStarsController.start();
     await loadPhotos();
     if (guestName()) els.guestName.value = guestName();
+    updateOwnerTools();
     registerWebMCP();
     void initWeddingCloud();
     if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("service-worker.js").catch(() => {});

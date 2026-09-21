@@ -179,7 +179,12 @@
         <div class="gallery-intro">
           <p class="eyebrow">Captured by the people we love</p>
           <h3>Every point of view,<br /><em>one shared memory.</em></h3>
-          <p>Tap a frame to see it in full, or leave a heart for the moments you love.</p>
+          <p class="gallery-intro-copy">Tap a frame to see it in full, or leave a heart for the moments you love.</p>
+          <div id="ownerTools" class="owner-tools" hidden>
+            <p class="owner-tools-label">Album owner tools</p>
+            <button id="downloadAllButton" class="button button-secondary" type="button">Download all originals</button>
+            <p id="downloadAllStatus" class="owner-tools-status" role="status" aria-live="polite"></p>
+          </div>
         </div>
         <div id="galleryGrid" class="gallery-grid" aria-live="polite"></div>
         <div id="galleryLoading" class="gallery-state" hidden>

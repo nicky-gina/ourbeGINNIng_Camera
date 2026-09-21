@@ -1,4 +1,4 @@
-# Nicky & Gina Wedding Camera — V0.3.0
+# Nicky & Gina Wedding Camera — V0.2.2
 
 A mobile-first, GitHub Pages-ready prototype for the wedding disposable-camera experience.
 
@@ -20,12 +20,19 @@ A mobile-first, GitHub Pages-ready prototype for the wedding disposable-camera e
 - Live shared **Our Night** gallery
 - One-heart-per-anonymous-user likes
 - Firestore and Storage security rules
-- Automatic full-size photo backup to a private Google Drive folder
-- Idempotent Drive backup with retry-safe duplicate prevention
-- Meaningful Drive filenames using capture time, guest name, and photo ID
-- Per-photo Drive backup status in Firestore and My Roll
+- Owner-only bulk download of every full uploaded original, using a selected folder where supported or memory-safe ZIP parts elsewhere
 
-This build is configured for the `ourbeginning-camera` Firebase project. Follow `firebase/SETUP.md` for the core services and `firebase/DRIVE_BACKUP_SETUP.md` for the one-time private Google Drive authorization and function deployment. If Firebase is temporarily unavailable, the app keeps photos in its device-local queue and retries later. If Drive is temporarily unavailable, Firebase Storage remains the primary copy and the server-side backup retries independently.
+This build is configured for the `ourbeginning-camera` Firebase project. Follow `firebase/SETUP.md` to enable the required Firebase services, publish the included rules, and verify uploads, the shared gallery, and hearts. If a Firebase service is unavailable, the app keeps photos in its device-local queue and retries later. This version has no Google Drive integration or Cloud Functions.
+
+## Owner album download
+
+The public convenience gate is configured near the bottom of `dist/firebase-config.js`:
+
+```js
+window.NG_OWNER_NAMES = ["Nicky"];
+```
+
+Names are matched without regard to capitalization or surrounding spaces. A matching guest sees **Download all originals** inside **Our Night**. Chromium desktop browsers save the individual JPEG files to a chosen folder. Other browsers receive ZIP parts containing up to 75 originals each. This is intentionally not secure authorization: any visitor can inspect or imitate the configured name, as requested for this informal wedding album.
 
 ## Test locally
 
@@ -39,5 +46,3 @@ Serve the `dist` folder from any local web server. Camera access normally requir
 4. The included workflow publishes the `dist` folder automatically.
 
 The production URL will look like `https://yourusername.github.io/repository-name/`.
-
-GitHub Pages deploys only the static `dist` frontend. Deploy the server-side backup separately with Firebase CLI as documented in `firebase/DRIVE_BACKUP_SETUP.md`.

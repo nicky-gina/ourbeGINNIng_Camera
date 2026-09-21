@@ -1,18 +1,4 @@
 {
-  "functions": [
-    {
-      "source": "functions",
-      "codebase": "default",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "drive-oauth-client.json",
-        "drive-backup-setup.local.json"
-      ]
-    }
-  ],
   "firestore": {
     "rules": "firebase/firestore.rules"
   },
