@@ -25,7 +25,13 @@
   let isDownloadingAlbum = false;
   let isPurgingAlbum = false;
 
-  const guestName = () => localStorage.getItem("ng_guest_name") || "";
+  let sessionGuestName = "";
+  let pendingRecord = null;
+  let isKeepingPhoto = false;
+  const guestName = () => {
+    try { return localStorage.getItem("ng_guest_name") || sessionGuestName; }
+    catch { return sessionGuestName; }
+  };
 
   function normalizedName(value) {
     return String(value || "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -54,9 +60,14 @@
             db.createObjectStore(STORE_NAME, { keyPath: "id" });
           }
         };
-        request.onsuccess = () => resolve(request.result);
+        request.onsuccess = () => {
+          const db = request.result;
+          db.onversionchange = () => { db.close(); dbPromise = null; };
+          db.onclose = () => { dbPromise = null; };
+          resolve(db);
+        };
         request.onerror = () => reject(request.error);
-      });
+      }).catch((error) => { dbPromise = null; throw error; });
     }
     return dbPromise;
   }
@@ -87,12 +98,18 @@
       tx.objectStore(STORE_NAME).put(photo);
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error("Local save aborted"));
     });
   }
 
   async function storePhoto(photo) {
     await persistPhoto(photo);
     photos.unshift(photo);
+  }
+
+  async function persistUploadStatus(photo) {
+    try { await persistPhoto(photo); }
+    catch (error) { console.warn("Upload status could not be saved locally", error); }
   }
 
   function setView(id) {
@@ -397,7 +414,7 @@
         if (isPurgingAlbum) break;
         photo.syncState = "uploading";
         photo.uploadAttempts = Number(photo.uploadAttempts || 0) + 1;
-        await persistPhoto(photo);
+        await persistUploadStatus(photo);
         renderRoll();
         try {
           const thumbBlob = await createThumbnailBlob(photo.blob);
@@ -412,12 +429,12 @@
           photo.uploadAttempts = 0;
           photo.originalPath = remote.originalPath;
           photo.thumbPath = remote.thumbPath;
-          await persistPhoto(photo);
+          await persistUploadStatus(photo);
           renderRoll();
         } catch (error) {
           console.error("Photo upload failed", error);
           photo.syncState = "failed";
-          await persistPhoto(photo);
+          await persistUploadStatus(photo);
           renderRoll();
           if (photo.uploadAttempts < 4) {
             const retryDelay = Math.min(30000, 4000 * (2 ** photo.uploadAttempts));
@@ -432,7 +449,7 @@
   }
 
   async function captureFromCamera() {
-    if (!stream || photos.length >= SHOT_LIMIT) return;
+    if (!stream || pendingPhoto || isKeepingPhoto || photos.length >= SHOT_LIMIT) return;
     els.flashOverlay.classList.remove("fire");
     void els.flashOverlay.offsetWidth;
     els.flashOverlay.classList.add("fire");
@@ -457,7 +474,7 @@
   }
 
   async function processFile(file) {
-    if (!file || photos.length >= SHOT_LIMIT) return;
+    if (!file || pendingPhoto || isKeepingPhoto || photos.length >= SHOT_LIMIT) return;
     els.processingOverlay.classList.add("is-visible");
     let loaded = null;
     try {
@@ -479,34 +496,76 @@
     if (els.reviewImage.src.startsWith("blob:")) URL.revokeObjectURL(els.reviewImage.src);
     els.reviewImage.removeAttribute("src");
     pendingPhoto = null;
+    pendingRecord = null;
+    els.reviewSaveStatus.textContent = "";
+    els.keepButton.textContent = "Keep photo";
   }
 
   async function keepPendingPhoto() {
-    if (!pendingPhoto) return;
+    if (!pendingPhoto || isKeepingPhoto) return;
+    isKeepingPhoto = true;
     els.keepButton.disabled = true;
+    els.retakeButton.disabled = true;
+    let cloudSaved = false;
     try {
       const now = Date.now();
-      const photo = {
+      const photo = pendingRecord || {
         id: `ng-${now}-${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`,
         createdAt: now,
         guestName: guestName(),
         blob: pendingPhoto,
         syncState: "pending"
       };
-      await storePhoto(photo);
+      pendingRecord = photo;
+      try {
+        await storePhoto(photo);
+      } catch (localError) {
+        console.warn("Local saving unavailable; uploading directly", localError);
+        els.reviewSaveStatus.textContent = "Local saving is unavailable. Uploading to the wedding album—keep this page open.";
+        els.keepButton.textContent = "Uploading…";
+        const cloud = weddingCloud || await initWeddingCloud();
+        if (!cloud || !navigator.onLine) throw new Error("Connect to the internet and tap Retry upload.");
+        const thumbBlob = await createThumbnailBlob(photo.blob);
+        const remote = await cloud.uploadPhoto({ ...photo, thumbBlob });
+        Object.assign(photo, remote, { syncState: "uploaded" });
+        if (!photos.some((saved) => saved.id === photo.id)) photos.unshift(photo);
+        cloudSaved = true;
+      }
       els.reviewDialog.close();
       clearPendingPhoto();
       renderRoll();
       updateCameraUI();
       if (navigator.vibrate) navigator.vibrate(35);
-      showToast(`Frame ${String(photos.length).padStart(2, "0")} added to My Roll.`);
+      showToast(cloudSaved ? "Saved to wedding album." : `Frame ${String(photos.length).padStart(2, "0")} added to My Roll.`);
       void flushUploadQueue();
     } catch (error) {
       console.error(error);
-      showToast("The photo could not be saved on this device.");
+      els.reviewSaveStatus.textContent = "Not saved yet. Keep this page open and retry, or save/share a copy. Refreshing or closing can lose this photo.";
+      els.keepButton.textContent = "Retry upload";
+      showToast("Photo still waiting to be saved.");
     } finally {
+      isKeepingPhoto = false;
       els.keepButton.disabled = false;
+      els.retakeButton.disabled = false;
     }
+  }
+
+  async function sharePendingPhoto() {
+    if (!pendingPhoto) return;
+    const file = new File([pendingPhoto], `Nicky-Gina-${pendingRecord?.createdAt || Date.now()}.jpg`, { type: "image/jpeg" });
+    try {
+      if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] });
+      else triggerBlobDownload(file, file.name);
+    } catch (error) {
+      if (error?.name !== "AbortError") showToast("Could not share. Keep this page open and retry.");
+    }
+  }
+
+  function discardPendingPhoto() {
+    if (isKeepingPhoto) return;
+    if (pendingRecord && !window.confirm("Discard this photo? It may not have finished uploading.")) return;
+    els.reviewDialog.close();
+    clearPendingPhoto();
   }
 
   function makePhotoUrl(photo) {
@@ -1028,7 +1087,8 @@
       els.guestName.focus();
       return;
     }
-    localStorage.setItem("ng_guest_name", name);
+    sessionGuestName = name;
+    try { localStorage.setItem("ng_guest_name", name); } catch { /* Keep name for this session. */ }
     els.nameError.textContent = "";
     setView("cameraView");
   });
@@ -1044,7 +1104,8 @@
   });
   els.libraryButton.addEventListener("click", () => els.fileInput.click());
   els.fileInput.addEventListener("change", () => processFile(els.fileInput.files?.[0]));
-  els.retakeButton.addEventListener("click", () => { els.reviewDialog.close(); clearPendingPhoto(); });
+  els.retakeButton.addEventListener("click", discardPendingPhoto);
+  els.savePendingButton.addEventListener("click", sharePendingPhoto);
   els.keepButton.addEventListener("click", keepPendingPhoto);
   els.closePhotoButton.addEventListener("click", closePhoto);
   els.sharePhotoButton.addEventListener("click", shareSelectedPhoto);
@@ -1055,7 +1116,7 @@
   });
   els.cameraInfoButton.addEventListener("click", () => els.infoDialog.showModal());
   els.closeInfoButton.addEventListener("click", () => els.infoDialog.close());
-  els.reviewDialog.addEventListener("cancel", (event) => { event.preventDefault(); els.reviewDialog.close(); clearPendingPhoto(); });
+  els.reviewDialog.addEventListener("cancel", (event) => { event.preventDefault(); discardPendingPhoto(); });
   els.photoDialog.addEventListener("cancel", (event) => { event.preventDefault(); closePhoto(); });
 
   document.addEventListener("visibilitychange", () => {
@@ -1074,6 +1135,9 @@
   window.addEventListener("offline", () => setCloudState("offline", "Offline"));
 
   window.addEventListener("beforeunload", stopCamera);
+  window.addEventListener("beforeunload", (event) => {
+    if (pendingRecord) { event.preventDefault(); event.returnValue = ""; }
+  });
   window.addEventListener("load", async () => {
     landingStarsController = createLandingStars(els.landingStars);
     landingStarsController.start();

@@ -1,4 +1,4 @@
-const CACHE = "ng-wedding-camera-v2-3";
+const CACHE = "ng-wedding-camera-v2-4";
 const SHELL = [
   "./",
   "./index.html",

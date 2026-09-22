@@ -18,4 +18,4 @@ window.NG_FIREBASE_CONFIG = {
  * Names are matched without regard to capitalization or surrounding spaces.
  */
 window.NG_OWNER_NAMES = ["NLO_ADMIN"];
-window.NG_APP_VERSION = "0.2.3";
+window.NG_APP_VERSION = "0.2.4";

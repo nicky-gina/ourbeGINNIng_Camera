@@ -1,4 +1,23 @@
-# Nicky & Gina Wedding Camera — V0.2.3
+# Nicky & Gina Wedding Camera — V0.2.4
+
+## V0.2.4 saving fallback
+
+If IndexedDB rejects a photo save, Keep photo uploads directly to Firebase.
+The review stays open until upload succeeds; on failure it retains the image
+and stable photo ID for Retry upload. Save / share a copy is available from
+the review. Name entry works in memory if localStorage is unavailable.
+Successful cloud-only photos appear in My Roll for this page session.
+Local upload-status write errors no longer prevent network uploads.
+
+Private browsing is not detected. The fallback responds to actual save failures.
+Private-session data may be cleared when the session ends, even when local saves
+succeed. In memory, unuploaded photos are lost on refresh/close; leave the page
+open until saved or manually share a copy. Browser leave-page warnings are best
+effort, especially on mobile. This does not restore the older iPhone error logs
+or prove its root cause, and needs testing on the affected phone.
+
+Deploy the updated dist folder through GitHub Pages. No new Firebase rules or
+Cloud Functions deployment is needed if V0.2.3 rules are already published.
 
 A mobile-first, GitHub Pages-ready prototype for the wedding disposable-camera experience.
 
