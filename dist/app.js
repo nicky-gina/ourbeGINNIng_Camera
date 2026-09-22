@@ -20,6 +20,11 @@
   let cloudInitPromise = null;
   let cloudState = "unconfigured";
   let galleryPhotos = [];
+  let galleryState = { loading: true, confirmed: false, error: false };
+  const galleryStart = performance.now();
+  let cloudReadyMs = 0;
+  let firstImageMs = 0;
+  const galleryCards = new Map();
   let galleryUnsubscribe = null;
   let isFlushingUploads = false;
   let isDownloadingAlbum = false;
@@ -383,6 +388,7 @@
       try {
         const { connectWeddingCloud } = await import("./firebase-bridge.mjs");
         weddingCloud = await connectWeddingCloud(config);
+        cloudReadyMs = performance.now() - galleryStart;
         setCloudState("connected", "Cloud connected");
         galleryUnsubscribe?.();
         galleryUnsubscribe = weddingCloud.subscribeGallery((records) => {
@@ -391,6 +397,10 @@
         }, (error) => {
           console.error("Gallery connection failed", error);
           setCloudState(navigator.onLine ? "error" : "offline", navigator.onLine ? "Gallery unavailable" : "Offline");
+        }, (state) => {
+          galleryState = state;
+          if (state.confirmed && !state.error && cloudState !== "connected") setCloudState("connected", "Cloud connected");
+          renderGallery();
         });
         void flushUploadQueue();
         return weddingCloud;
@@ -626,59 +636,73 @@
 
   function renderGallery() {
     if (!els.galleryGrid) return;
-    els.galleryGrid.replaceChildren();
-    els.galleryLoading.hidden = cloudState !== "connecting";
-
-    if (cloudState === "unconfigured") {
-      els.galleryEmpty.hidden = false;
-      els.galleryEmptyTitle.textContent = "Cloud album not connected";
-      els.galleryEmptyText.textContent = "Add the Firebase configuration to begin sharing everyone’s photos.";
-      return;
+    const ids = new Set(galleryPhotos.map(p => p.id));
+    for (const [id, entry] of galleryCards) {
+      if (!ids.has(id)) { entry.card.remove(); galleryCards.delete(id); }
     }
-    if (cloudState === "connecting") {
-      els.galleryEmpty.hidden = true;
-      return;
-    }
-    if (cloudState === "offline" || cloudState === "error") {
-      els.galleryEmpty.hidden = galleryPhotos.length > 0;
-      els.galleryEmptyTitle.textContent = cloudState === "offline" ? "You’re offline" : "The album is taking a pause";
-      els.galleryEmptyText.textContent = "Your camera and My Roll still work. The shared album will reconnect automatically.";
-    } else {
-      els.galleryEmpty.hidden = galleryPhotos.length > 0;
-      els.galleryEmptyTitle.textContent = "The first frame is waiting";
-      els.galleryEmptyText.textContent = "Photos shared by guests will gather here throughout the celebration.";
-    }
-
-    galleryPhotos.forEach((photo) => {
-      const card = document.createElement("article");
-      card.className = "gallery-card";
-      const photoButton = document.createElement("button");
-      photoButton.type = "button";
-      photoButton.className = "gallery-card-photo";
-      photoButton.setAttribute("aria-label", `Open photo by ${photo.guestName || "Guest"}`);
-      const img = document.createElement("img");
-      img.loading = "lazy";
-      img.src = photo.thumbUrl;
-      img.alt = `Wedding photo by ${photo.guestName || "Guest"}`;
-      photoButton.append(img);
-      photoButton.addEventListener("click", () => openGalleryPhoto(photo));
-
-      const credit = document.createElement("span");
-      credit.className = "gallery-credit";
-      credit.textContent = `by ${photo.guestName || "Guest"}`;
-
-      const heart = document.createElement("button");
-      heart.type = "button";
-      heart.className = `heart-button${photo.liked ? " is-liked" : ""}`;
-      heart.setAttribute("aria-label", photo.liked ? "Remove heart" : "Heart this photo");
-      heart.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.4 5.4 0 0 0-7.7 0L12 5.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7L12 21l8.8-8.7a5.4 5.4 0 0 0 0-7.7Z"></path></svg>';
-      const count = document.createElement("span");
-      count.textContent = String(photo.likeCount || 0);
-      heart.append(count);
-      heart.addEventListener("click", () => toggleGalleryLike(photo, heart));
-      card.append(photoButton, credit, heart);
-      els.galleryGrid.append(card);
+    galleryPhotos.forEach((photo, index) => {
+      let entry = galleryCards.get(photo.id);
+      if (!entry) {
+        const card = document.createElement("article");
+        card.className = "gallery-card";
+        const button = document.createElement("button");
+        button.className = "gallery-card-photo";
+        button.type = "button";
+        const img = document.createElement("img");
+        img.loading = index < 6 ? "eager" : "lazy";
+        const credit = document.createElement("span");
+        credit.className = "gallery-credit";
+        const heart = document.createElement("button");
+        heart.className = "heart-button";
+        heart.type = "button";
+        entry = { card, button, img, credit, heart, photo, loaded: false, failed: false };
+        button.append(img);
+        card.append(button, credit, heart);
+        galleryCards.set(photo.id, entry);
+        button.onclick = () => openGalleryPhoto(entry.photo);
+        heart.onclick = () => toggleGalleryLike(entry.photo, heart);
+        img.onload = () => {
+          entry.loaded = true;
+          entry.failed = false;
+          if (!firstImageMs) firstImageMs = performance.now() - galleryStart;
+          renderGallery();
+        };
+        img.onerror = () => { entry.failed = true; renderGallery(); };
+      }
+      entry.photo = photo;
+      entry.button.disabled = !photo.thumbUrl || Boolean(photo.thumbError);
+      entry.button.setAttribute("aria-label", "Open photo by " + (photo.guestName || "Guest"));
+      entry.img.alt = photo.thumbError || entry.failed ? "Photo unavailable. Try refresh." : "Wedding photo by " + (photo.guestName || "Guest");
+      if (photo.thumbUrl && entry.img.getAttribute("src") !== photo.thumbUrl) {
+        entry.loaded = false;
+        entry.failed = false;
+        entry.img.src = photo.thumbUrl;
+      }
+      entry.credit.textContent = "by " + (photo.guestName || "Guest");
+      entry.heart.textContent = (photo.liked ? "♥ " : "♡ ") + (photo.likeCount || 0);
+      entry.heart.classList.toggle("is-liked", Boolean(photo.liked));
+      entry.heart.setAttribute("aria-label", photo.liked ? "Remove heart" : "Heart this photo");
+      entry.heart.disabled = photo.liked === undefined;
+      const position = els.galleryGrid.children[index];
+      if (position !== entry.card) els.galleryGrid.insertBefore(entry.card, position || null);
     });
+    const failed = galleryState.error || [...galleryCards.values()].some(e => e.failed || e.photo.thumbError);
+    const initialImagesPending = [...galleryCards.values()].slice(0, 6).some(e => e.photo.thumbUrl && !e.loaded && !e.failed);
+    const busy = !failed && cloudState !== "offline" && cloudState !== "error" &&
+      (galleryState.loading || initialImagesPending || !galleryState.confirmed);
+    els.gallerySpinner.hidden = !busy;
+    els.refreshGalleryButton.disabled = galleryState.loading && !failed && cloudState !== "offline" && cloudState !== "error";
+    els.galleryFetchStatus.textContent = failed || cloudState === "error" ? "Couldn’t load some photos. Tap refresh." :
+      cloudState === "offline" ? "You’re offline." : busy ? "Loading photos…" :
+      !galleryState.confirmed ? "Waiting for server…" : "";
+    els.galleryLoading.hidden = true;
+    els.galleryEmpty.hidden = galleryPhotos.length > 0 || busy || !galleryState.confirmed;
+    els.galleryEmptyTitle.textContent = "No photos yet";
+    els.galleryEmptyText.textContent = "Be the first to capture a moment.";
+    els.galleryTimings.hidden = !isAlbumOwner();
+    els.galleryTimings.textContent = "Cloud ready: " + (cloudReadyMs / 1000).toFixed(2) +
+      "s · Records/URL updates: " + ((galleryState.recordsMs || 0) / 1000).toFixed(2) +
+      "s since subscription · First image: " + (firstImageMs ? (firstImageMs / 1000).toFixed(2) + "s" : "waiting");
   }
 
   async function toggleGalleryLike(photo, button = null) {
@@ -1142,10 +1166,26 @@
     landingStarsController = createLandingStars(els.landingStars);
     landingStarsController.start();
     await loadPhotos();
+    void flushUploadQueue();
     if (guestName()) els.guestName.value = guestName();
     updateOwnerTools();
     registerWebMCP();
     void initWeddingCloud();
     if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
+  // Start cloud work without waiting for images, fonts or IndexedDB.
+  void initWeddingCloud();
+  els.refreshGalleryButton.addEventListener("click", async () => {
+    if (galleryState.loading && cloudState === "connected") return;
+    galleryState = { loading: true, confirmed: false, error: false };
+    renderGallery();
+    const cloud = weddingCloud || await initWeddingCloud();
+    if (cloud) {
+      for (const entry of galleryCards.values()) {
+        if (entry.failed) { entry.failed = false; entry.img.removeAttribute("src"); }
+      }
+      await cloud.refreshGallery();
+    }
+    else { galleryState.loading = false; galleryState.error = true; renderGallery(); }
   });
 })();

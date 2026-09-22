@@ -10,6 +10,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocsFromServer,
   getFirestore,
   limit,
   onSnapshot,
@@ -85,35 +86,84 @@ export async function connectWeddingCloud(config) {
     return { originalPath, thumbPath };
   }
 
-  function subscribeGallery(onPhotos, onError) {
-    const galleryQuery = query(collection(db, "photos"), orderBy("createdAt", "desc"), limit(60));
-    return onSnapshot(galleryQuery, async (snapshot) => {
-      try {
-        const records = await Promise.all(snapshot.docs.map(async (snapshotDoc) => {
-          const data = snapshotDoc.data();
-          const likeRef = doc(db, "photos", snapshotDoc.id, "likes", user.uid);
-          const [thumbUrl, likeSnapshot] = await Promise.all([
-            getDownloadURL(ref(storage, data.thumbPath)),
-            getDoc(likeRef)
-          ]);
-          return {
-            id: snapshotDoc.id,
-            ...data,
-            thumbUrl,
-            liked: likeSnapshot.exists()
-          };
-        }));
+  const urls = new Map();
+  const likes = new Map();
+  let refreshGallery = async () => {};
+  function subscribeGallery(onPhotos, onError, onState = () => {}) {
+    const galleryQuery = query(collection(db, "photos"), orderBy("createdAt", "desc"));
+    let generation = 0;
+    let stopped = false;
+    let refreshing = false;
+    let timer;
+    const started = performance.now();
+    const bounded = (promise) => new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Gallery request timed out")), 15000);
+      promise.then(resolve, reject).finally(() => clearTimeout(timeout));
+    });
+    async function apply(snapshot) {
+      if (stopped) return;
+      const current = ++generation;
+      clearTimeout(timer);
+      if (snapshot.metadata.fromCache) timer = setTimeout(() => fail(new Error("Server response timed out")), 20000);
+      let remaining = snapshot.size;
+      let failed = false;
+      const records = snapshot.docs.map(d => ({ ...d.data(), id: d.id, liked: likes.get(d.id) }));
+      const emit = () => {
+        if (stopped || current !== generation) return;
         onPhotos(records);
-      } catch (error) {
-        onError(error);
-      }
-    }, onError);
+        onState({ loading: remaining > 0, error: failed,
+          confirmed: !snapshot.metadata.fromCache,
+          recordsMs: performance.now() - started });
+      };
+      records.forEach(photo => { photo.thumbUrl = urls.get(photo.thumbPath); });
+      emit();
+      await Promise.all(records.map(async photo => {
+        try {
+          if (!photo.thumbUrl) {
+            photo.thumbUrl = await bounded(getDownloadURL(ref(storage, photo.thumbPath)));
+            urls.set(photo.thumbPath, photo.thumbUrl);
+          }
+        } catch { photo.thumbError = true; failed = true; }
+        remaining--;
+        emit();
+        // Personal hearts never delay the photo URL or other cards.
+        if (!likes.has(photo.id)) {
+          try {
+            const result = await bounded(getDoc(doc(db, "photos", photo.id, "likes", user.uid)));
+            if (!likes.has(photo.id)) likes.set(photo.id, result.exists());
+            photo.liked = likes.get(photo.id);
+            emit();
+          } catch { /* Leave heart disabled until refresh retries it. */ }
+        }
+      }));
+    }
+    const fail = error => {
+      if (stopped) return;
+      clearTimeout(timer);
+      generation++;
+      onState({ loading: false, error: true, confirmed: false });
+      onError(error);
+    };
+    timer = setTimeout(() => fail(new Error("Gallery connection timed out")), 20000);
+    onState({ loading: true, error: false, confirmed: false });
+    const stop = onSnapshot(galleryQuery, { includeMetadataChanges: true },
+      snapshot => { if (!refreshing) void apply(snapshot); }, fail);
+    refreshGallery = async () => {
+      if (refreshing || stopped) return;
+      refreshing = true;
+      generation++;
+      onState({ loading: true, error: false, confirmed: false });
+      try { await apply(await bounded(getDocsFromServer(galleryQuery))); }
+      catch (error) { fail(error); }
+      finally { refreshing = false; }
+    };
+    return () => { stopped = true; generation++; clearTimeout(timer); stop(); };
   }
 
   async function toggleLike(photoId) {
     const photoRef = doc(db, "photos", photoId);
     const likeRef = doc(db, "photos", photoId, "likes", user.uid);
-    return runTransaction(db, async (transaction) => {
+    const result = await runTransaction(db, async (transaction) => {
       const photoSnapshot = await transaction.get(photoRef);
       const likeSnapshot = await transaction.get(likeRef);
       if (!photoSnapshot.exists()) throw new Error("Photo no longer exists");
@@ -127,6 +177,8 @@ export async function connectWeddingCloud(config) {
       transaction.update(photoRef, { likeCount: currentCount + 1 });
       return { liked: true, likeCount: currentCount + 1 };
     });
+    likes.set(photoId, result.liked);
+    return result;
   }
 
   async function getOriginalUrl(path) {
@@ -186,6 +238,7 @@ export async function connectWeddingCloud(config) {
     userId: user.uid,
     uploadPhoto,
     subscribeGallery,
+    refreshGallery: () => refreshGallery(),
     toggleLike,
     getOriginalUrl,
     listAllPhotos,

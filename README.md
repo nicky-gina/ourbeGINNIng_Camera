@@ -1,4 +1,22 @@
-# Nicky & Gina Wedding Camera — V0.2.4
+# Nicky & Gina Wedding Camera — V0.2.5
+
+## V0.2.5 gallery
+
+Built from the uploaded canonical V0.2.4 archive, preserving owner names.
+Cloud initialization starts alongside local loading. Cards appear progressively;
+personal heart checks do not block images. Thumbnail URLs are cached for the
+page session and existing card/image nodes are reused.
+
+Loading and Refresh controls sit above the grid on the right. Empty state
+requires a confirmed server response. Refresh fetches all photo records from
+the server (the previous 60-record cap is removed), retains existing images
+while fetching, and retries failed images and URL lookups.
+Owners see cloud startup, record/URL-update and first-image timings.
+The first six images load eagerly; the remaining images load lazily.
+
+Deploy dist through GitHub Pages. No Firebase rule changes or data migration.
+Thumbnail URLs are not stored in Firestore. Test on real guest phones and
+networks to measure the actual speed improvement.
 
 ## V0.2.4 saving fallback
 

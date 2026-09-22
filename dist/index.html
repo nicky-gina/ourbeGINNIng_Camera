@@ -188,7 +188,13 @@
             <p id="downloadAllStatus" class="owner-tools-status" role="status" aria-live="polite"></p>
           </div>
         </div>
-        <div id="galleryGrid" class="gallery-grid" aria-live="polite"></div>
+        <div class="gallery-toolbar">
+          <span id="gallerySpinner" class="gallery-spinner" aria-hidden="true"></span>
+          <span id="galleryFetchStatus" role="status" aria-live="polite">Loading photos…</span>
+          <button id="refreshGalleryButton" class="text-button" type="button" aria-label="Refresh photos from server">↻ Refresh</button>
+        </div>
+        <p id="galleryTimings" class="owner-tools-status" hidden></p>
+        <div id="galleryGrid" class="gallery-grid"></div>
         <div id="galleryLoading" class="gallery-state" hidden>
           <span class="developing-mark"></span>
           <p>Gathering tonight’s frames…</p>
