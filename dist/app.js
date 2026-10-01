@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const SHOT_LIMIT = 12;
+  const SHOT_LIMIT = 36;
   const DOWNLOAD_BATCH_SIZE = 75;
   const DB_NAME = "ng-wedding-camera";
   const STORE_NAME = "photos";
