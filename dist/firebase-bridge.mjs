@@ -2,8 +2,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/fireba
 import {
   getAuth,
   onAuthStateChanged,
-  signInAnonymously
+  signInAnonymously,
+  signOut
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
+
+export async function signOutWeddingSession(config) {
+  await signOut(getAuth(initializeApp(config)));
+}
 import {
   collection,
   deleteDoc,

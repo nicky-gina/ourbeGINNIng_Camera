@@ -1,4 +1,4 @@
-const CACHE = "ng-wedding-camera-v2-5";
+const CACHE = "ng-wedding-camera-v2-6";
 const SHELL = [
   "./",
   "./index.html",
@@ -17,7 +17,7 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))));
+  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith("ng-wedding-camera-") && key !== CACHE).map((key) => caches.delete(key)))));
   self.clients.claim();
 });
 

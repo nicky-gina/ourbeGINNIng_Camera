@@ -386,6 +386,8 @@ svg { width: 1.35rem; height: 1.35rem; fill: none; stroke: currentColor; stroke-
 .roll-intro p { margin: 0; }
 .roll-intro p:last-child { max-width: 11rem; text-align: right; }
 .roll-intro strong { color: var(--ivory); font-weight: 500; }
+.session-tools { padding: 1rem 1.2rem; }
+.session-tools p { color: var(--silver-dim); font-size: .72rem; line-height: 1.5; margin: .65rem 0 0; }
 
 .roll-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 2px; }
 .roll-card { position: relative; aspect-ratio: 3 / 4; padding: 0; border: 0; overflow: hidden; background: var(--navy-soft); cursor: zoom-in; }

@@ -29,6 +29,7 @@
   let isFlushingUploads = false;
   let isDownloadingAlbum = false;
   let isPurgingAlbum = false;
+  let isLoggingOut = false;
 
   let sessionGuestName = "";
   let pendingRecord = null;
@@ -118,6 +119,7 @@
   }
 
   function setView(id) {
+    if (isLoggingOut) return;
     document.querySelectorAll(".view").forEach((view) => view.classList.toggle("is-active", view.id === id));
     activeView = id;
     if (landingStarsController) {
@@ -210,6 +212,7 @@
   }
 
   async function startCamera() {
+    if (isLoggingOut) return;
     if (!navigator.mediaDevices?.getUserMedia) {
       showToast("Live camera is not supported here. Choose a photo instead.");
       updateCameraUI();
@@ -254,7 +257,7 @@
     els.shutterButton.disabled = !stream || remaining === 0;
     els.switchCameraButton.disabled = !stream || remaining === 0;
     els.libraryButton.disabled = remaining === 0;
-    if (remaining === 0) showToast("Your roll is complete — all 12 frames are yours.");
+    if (remaining === 0) showToast(`Your roll is complete — all ${SHOT_LIMIT} frames are yours.`);
   }
 
   function getCoverCrop(sourceWidth, sourceHeight, targetRatio) {
@@ -375,6 +378,7 @@
   }
 
   async function initWeddingCloud() {
+    if (isLoggingOut) return null;
     if (weddingCloud) return weddingCloud;
     if (cloudInitPromise) return cloudInitPromise;
     const config = window.NG_FIREBASE_CONFIG;
@@ -416,7 +420,7 @@
   }
 
   async function flushUploadQueue() {
-    if (!weddingCloud || !navigator.onLine || isFlushingUploads || isPurgingAlbum) return;
+    if (isLoggingOut || !weddingCloud || !navigator.onLine || isFlushingUploads || isPurgingAlbum) return;
     isFlushingUploads = true;
     try {
       const queue = photos.filter((photo) => photo.syncState === "pending" || photo.syncState === "failed");
@@ -459,6 +463,7 @@
   }
 
   async function captureFromCamera() {
+    if (isLoggingOut) return;
     if (!stream || pendingPhoto || isKeepingPhoto || photos.length >= SHOT_LIMIT) return;
     els.flashOverlay.classList.remove("fire");
     void els.flashOverlay.offsetWidth;
@@ -512,6 +517,7 @@
   }
 
   async function keepPendingPhoto() {
+    if (isLoggingOut) return;
     if (!pendingPhoto || isKeepingPhoto) return;
     isKeepingPhoto = true;
     els.keepButton.disabled = true;
@@ -999,6 +1005,58 @@
     }
   }
 
+  async function logoutAndReset() {
+    if (isLoggingOut) return;
+    if (isKeepingPhoto || isFlushingUploads || isDownloadingAlbum || isPurgingAlbum) {
+      showToast("Please wait for the current save, upload or album action to finish, then try again.");
+      return;
+    }
+    if (!window.confirm("Log out and start a fresh 36-photo roll?\n\nThis removes your name, this app’s local photos (including photos not yet uploaded), and its offline cache from this browser. Uploaded photos stay in the shared album.\n\nClose other camera-app tabs first. Continue?")) return;
+    isLoggingOut = true;
+    document.body.inert = true;
+    els.logoutStatus.textContent = "Resetting this camera…";
+    stopCamera();
+    try {
+      // Let an existing connection finish before signing it out; do not start a new login.
+      if (cloudInitPromise) await cloudInitPromise;
+      galleryUnsubscribe?.();
+      if (window.NG_FIREBASE_CONFIG) {
+        const { signOutWeddingSession } = await import("./firebase-bridge.mjs");
+        await signOutWeddingSession(window.NG_FIREBASE_CONFIG);
+      }
+      if (dbPromise) (await dbPromise.catch(() => null))?.close();
+      dbPromise = null;
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(DB_NAME);
+        request.onsuccess = resolve;
+        request.onerror = () => reject(request.error);
+        request.onblocked = () => reject(new Error("Close other camera-app tabs and try again."));
+      });
+      localStorage.removeItem("ng_guest_name");
+      sessionGuestName = "";
+      pendingRecord = null;
+      if ("serviceWorker" in navigator) {
+        const scope = new URL("./", location.href).href;
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.filter((registration) => registration.scope === scope).map((registration) => registration.unregister()));
+      }
+      if ("caches" in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter((key) => key.startsWith("ng-wedding-camera-")).map((key) => caches.delete(key)));
+      }
+      location.reload();
+    } catch (error) {
+      console.error("Camera reset failed", error);
+      els.logoutStatus.textContent = "Reset could not finish. Close other camera-app tabs and try again. Some local data may already have been cleared.";
+      document.body.inert = false;
+      // Prevent further capture with a partially reset session until a reload.
+      els.logoutButton.textContent = "Reload camera";
+      els.logoutButton.onclick = () => location.reload();
+      els.logoutButton.removeEventListener("click", logoutAndReset);
+      showToast("Please reload the camera before continuing.");
+    }
+  }
+
   async function clearLocalPhotos() {
     const db = await openDatabase();
     await new Promise((resolve, reject) => {
@@ -1135,6 +1193,7 @@
   els.sharePhotoButton.addEventListener("click", shareSelectedPhoto);
   els.downloadAllButton?.addEventListener("click", downloadAllOriginals);
   els.deleteAllButton?.addEventListener("click", deleteAllPhotos);
+  els.logoutButton.addEventListener("click", logoutAndReset);
   els.fullPhotoHeartButton.addEventListener("click", () => {
     if (selectedPhoto?.originalPath) void toggleGalleryLike(selectedPhoto, els.fullPhotoHeartButton);
   });
